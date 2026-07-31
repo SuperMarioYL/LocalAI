@@ -449,6 +449,46 @@ var _ = Describe("DetectThinkingStartToken", func() {
 			Expect(token).To(Equal("<|START_THINKING|>"))
 		})
 	})
+
+	Context("when the prompt contains a pre-closed thinking marker (issue #11135)", func() {
+		It("returns empty for a pre-closed marker in the prompt", func() {
+			// Gemma-4 chat templates end the generation prompt with a thought
+			// channel that is already closed: <|channel>thought<channel|>.
+			prompt := "user: hello<|channel>thought<channel|>"
+			token := DetectThinkingStartToken(prompt, nil)
+			Expect(token).To(BeEmpty())
+		})
+
+		It("still returns the token for a non-pre-closed (open) marker", func() {
+			// Control: an open marker (no matching close tag right after it) must
+			// still enter reasoning state as before.
+			prompt := "user: hello<|channel>thought"
+			token := DetectThinkingStartToken(prompt, nil)
+			Expect(token).To(Equal("<|channel>thought"))
+		})
+
+		It("returns the token when an open marker trails an earlier pre-closed one", func() {
+			// LastIndex (not first/Contains): a pre-closed marker earlier in the
+			// prompt plus a trailing OPEN <|channel>thought must still return the
+			// token so the model's actual (trailing) thought is captured.
+			prompt := "user: hi<|channel>thought<channel|> more<|channel>thought"
+			token := DetectThinkingStartToken(prompt, nil)
+			Expect(token).To(Equal("<|channel>thought"))
+		})
+
+		It("does not label all deltas as reasoning for a pre-closed prompt", func() {
+			// Streaming runs ExtractReasoningWithConfig per delta: a detected
+			// start token is prepended so the extractor pairs it with a close
+			// tag. With the pre-closed guard no start token is detected, so the
+			// answer streams as regular content (reasoning stays empty).
+			prompt := "user: hello<|channel>thought<channel|>"
+			startToken := DetectThinkingStartToken(prompt, nil)
+			answer := "The answer is 42."
+			reasoning, cleaned := ExtractReasoningWithConfig(answer, startToken, Config{})
+			Expect(reasoning).To(BeEmpty())
+			Expect(cleaned).To(Equal(answer))
+		})
+	})
 })
 
 var _ = Describe("PrependThinkingTokenIfNeeded", func() {

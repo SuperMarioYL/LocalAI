@@ -44,9 +44,20 @@ func DetectThinkingStartToken(prompt string, config *Config) string {
 	// Check if prompt ends with any of these tokens (allowing for trailing whitespace/newlines)
 	trimmedPrompt := strings.TrimRight(prompt, " \t\n\r")
 	for _, token := range thinkingStartTokens {
-		if strings.Contains(trimmedPrompt, token) {
-			return token
+		idx := strings.LastIndex(trimmedPrompt, token)
+		if idx == -1 {
+			continue
 		}
+		// Pre-closed-marker guard — mirrors the ClosingTokenForStart guard in
+		// ExtractReasoningComplete (#11135). A prompt whose template already closed
+		// the thought channel (e.g. "<|channel>thought<channel|>") must not enter
+		// reasoning state, or every streaming delta is mislabeled as reasoning.
+		if end := ClosingTokenForStart(token, config); end != "" {
+			if strings.HasPrefix(trimmedPrompt[idx+len(token):], end) {
+				continue // thought channel already closed in the prompt → regular content
+			}
+		}
+		return token
 	}
 
 	// Also check if any of these tokens appear near the end (within last 100 chars)
